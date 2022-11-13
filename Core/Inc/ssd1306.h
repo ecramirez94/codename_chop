@@ -17,6 +17,7 @@
 
 #include "stm32f4xx_hal.h"
 #include "fonts.h"
+#include "screens.h"
 
 // I2c address
 #ifndef SSD1306_I2C_ADDR
@@ -33,7 +34,6 @@
 #ifndef SSD1306_HEIGHT
 #define SSD1306_HEIGHT          64
 #endif // SSD1306_HEIGHT
-
 
 //
 //  Enumeration for screen colors
@@ -61,7 +61,11 @@ uint8_t ssd1306_Init(I2C_HandleTypeDef *hi2c);
 void ssd1306_UpdateScreen(I2C_HandleTypeDef *hi2c);
 void ssd1306_Fill(SSD1306_COLOR color);
 void ssd1306_DrawPixel(uint8_t x, uint8_t y, SSD1306_COLOR color);
+void ssd1306_DrawHLine(uint8_t x, uint8_t y, uint8_t l, SSD1306_COLOR color);
+void ssd1306_DrawVLine(uint8_t x, uint8_t y, uint8_t h, SSD1306_COLOR color);
 void ssd1306_DrawBox(uint8_t x, uint8_t y, uint8_t w, uint8_t h, SSD1306_COLOR color);
+void ssd1306_DrawBitmap(uint8_t x, uint8_t y, uint8_t w, uint8_t h, ScreenDef Screen, SSD1306_COLOR color);
+void ssd1306_DrawXBitmap(uint8_t x, uint8_t y, uint8_t w, uint8_t h, ScreenDef Screen, SSD1306_COLOR color);
 char ssd1306_WriteChar(char ch, FontDef Font, SSD1306_COLOR color);
 char ssd1306_WriteString(char* str, FontDef Font, SSD1306_COLOR color);
 void ssd1306_SetCursor(uint8_t x, uint8_t y);

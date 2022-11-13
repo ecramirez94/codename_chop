@@ -26,7 +26,10 @@
 #include <stdio.h>
 #include "ssd1306.h"
 #include "fonts.h"
+#include "screens.h"
 #include "constants.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
   uint16_t raw;
+  uint16_t raw_avg = 0;
   char msg[10];
   char dat[5];
 
@@ -128,16 +132,20 @@ int main(void)
   ssd1306_Fill(Black);
   ssd1306_UpdateScreen(&hi2c1);
 
-  HAL_Delay(1000);
+  HAL_Delay(500);
 
-  // Write data to local screen buffer
-  ssd1306_SetCursor(0, 0);
-  ssd1306_WriteString("ssd1306", Font_11x18, White);
+  //Draw Lamchop Logo Splash Screen
+  ssd1306_DrawXBitmap(0, 0, 128, 64, Logo, White);
+  ssd1306_UpdateScreen(&hi2c1);
 
-  ssd1306_SetCursor(0, 36);
-  ssd1306_WriteString("ADC: ", Font_7x10, White);
+  HAL_Delay(2000);
 
-  // Copy all data from local screenbuffer to the screen
+  ssd1306_Fill(Black);
+
+  // Draw Home Screen Frame
+  Draw_Home_Screen();
+  ssd1306_SetCursor(2, 54);
+  ssd1306_WriteString("ADC: ", Font_6x8, White);
   ssd1306_UpdateScreen(&hi2c1);
   /* USER CODE END 2 */
 
@@ -567,14 +575,12 @@ void startReadADC(void const * argument)
 	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
 	  raw = HAL_ADC_GetValue(&hadc1);
 
-	  // Convert to string and print
-	  sprintf(msg, "%hu\r\n", raw);
-	  HAL_UART_Transmit(&huart3, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
+	  raw_avg = (raw_avg + raw) / 2;
 
-	  sprintf(dat, "%hu", raw);
-	  ssd1306_SetCursor(30, 36);
+	  sprintf(dat, "%hu", raw_avg);
+	  ssd1306_SetCursor(30, 53);
 	  ssd1306_DrawBox(30, 36, 30, 8, Black);
-	  ssd1306_WriteString((char*)dat, Font_7x10, White);
+	  ssd1306_WriteString((char*)dat, Font_6x8, White);
 	  ssd1306_UpdateScreen(&hi2c1);
 
     osDelay(500);
@@ -612,9 +618,9 @@ void startUI_OLED(void const * argument)
 
 			break;
 			case SELECT:
-			  ssd1306_SetCursor(0, 36);
-			  ssd1306_WriteString("SELECT", Font_7x10, White);
-			  ssd1306_UpdateScreen(&hi2c1);
+//			  ssd1306_SetCursor(0, 5);
+//			  ssd1306_WriteString("SELECT", Font_6x8, White);
+//			  ssd1306_UpdateScreen(&hi2c1);
 			break;
 			case BACK:
 

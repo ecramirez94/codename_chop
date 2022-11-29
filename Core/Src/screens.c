@@ -22,14 +22,16 @@ void Draw_Home_Screen(void)
 	// Bottom Horizontal Line
 	ssd1306_DrawHLine(0, 63, 128, White);
 	// Temperature Dividers
-	ssd1306_DrawHLine(1, 51, 127, White);
+	ssd1306_DrawHLine(1, 50, 127, White);
 	ssd1306_DrawVLine((SSD1306_WIDTH / 2), 50, 63, White);
 
 	/*
 	 * Fill in Text
 	 */
 	ssd1306_SetCursor(2, 53);
-	ssd1306_WriteString("ADC: ", Font_6x8, White);
+	ssd1306_WriteString("Set: ", Font_6x8, White);
+	ssd1306_SetCursor(66, 53);
+	ssd1306_WriteString("Act: ", Font_6x8, White);
 }
 
 /*

@@ -24,10 +24,11 @@
 /* USER CODE BEGIN Includes */
 #include <string.h>
 #include <stdio.h>
-#include "ssd1306.h"
-#include "fonts.h"
-#include "screens.h"
 #include "constants.h"
+#include "fonts.h"
+#include "LUTs.h"
+#include "screens.h"
+#include "ssd1306.h"
 
 
 /* USER CODE END Includes */
@@ -39,13 +40,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-  uint16_t raw;
-  uint16_t raw_avg = 0;
-  char msg[10];
-  char dat[5];
-
-  uint8_t nav_button_pressed = FALSE;
-  uint8_t mode_button_pressed = FALSE;
+//ADC_ChannelConfTypeDef sConfig = {0};
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -59,15 +54,20 @@ ADC_HandleTypeDef hadc1;
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c2;
 
-TIM_HandleTypeDef htim12;
-
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
-osThreadId readADCHandle;
+osThreadId htr_ctrl_loopHandle;
 osThreadId updateUI_OLEDHandle;
 /* USER CODE BEGIN PV */
+int avgTempArr[5];
+int avgPotArr[5];
 
+uint8_t rolling = FALSE;
+uint8_t nav_button_pressed = FALSE;
+uint8_t mode_button_pressed = FALSE;
+
+ADC_ChannelConfTypeDef sConfig = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,9 +77,8 @@ static void MX_I2C1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM12_Init(void);
 static void MX_USART3_UART_Init(void);
-void startReadADC(void const * argument);
+void start_htr_ctrl_loop(void const * argument);
 void startUI_OLED(void const * argument);
 
 /* USER CODE BEGIN PFP */
@@ -123,30 +122,26 @@ int main(void)
   MX_I2C2_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
-  MX_TIM12_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  /*
+   * Initialize OLED displays
+   */
   ssd1306_Init(&hi2c1);
-
-  ssd1306_Fill(Black);
-  ssd1306_UpdateScreen(&hi2c1);
-
   HAL_Delay(500);
-
   //Draw Lamchop Logo Splash Screen
   ssd1306_DrawXBitmap(0, 0, 128, 64, Logo, White);
   ssd1306_UpdateScreen(&hi2c1);
-
-  HAL_Delay(2000);
-
-  ssd1306_Fill(Black);
-
+  HAL_Delay(1500);
   // Draw Home Screen Frame
+  ssd1306_Fill(Black);
   Draw_Home_Screen();
-  ssd1306_SetCursor(2, 54);
-  ssd1306_WriteString("ADC: ", Font_6x8, White);
   ssd1306_UpdateScreen(&hi2c1);
+
+  // Start ADC conversion
+  // Pass (The ADC Instance, Result Buffer Address, Buffer Length)
+
+
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -166,9 +161,9 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of readADC */
-  osThreadDef(readADC, startReadADC, osPriorityNormal, 0, 128);
-  readADCHandle = osThreadCreate(osThread(readADC), NULL);
+  /* definition and creation of htr_ctrl_loop */
+  osThreadDef(htr_ctrl_loop, start_htr_ctrl_loop, osPriorityNormal, 0, 128);
+  htr_ctrl_loopHandle = osThreadCreate(osThread(htr_ctrl_loop), NULL);
 
   /* definition and creation of updateUI_OLED */
   osThreadDef(updateUI_OLED, startUI_OLED, osPriorityNormal, 0, 128);
@@ -205,7 +200,7 @@ void SystemClock_Config(void)
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -213,8 +208,21 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 180;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Activate the Over-Drive mode
+  */
+  if (HAL_PWREx_EnableOverDrive() != HAL_OK)
   {
     Error_Handler();
   }
@@ -223,12 +231,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
@@ -246,7 +254,7 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 0 */
 
-  ADC_ChannelConfTypeDef sConfig = {0};
+//  ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -255,7 +263,7 @@ static void MX_ADC1_Init(void)
   /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
@@ -355,48 +363,6 @@ static void MX_I2C2_Init(void)
 }
 
 /**
-  * @brief TIM12 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM12_Init(void)
-{
-
-  /* USER CODE BEGIN TIM12_Init 0 */
-
-  /* USER CODE END TIM12_Init 0 */
-
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM12_Init 1 */
-
-  /* USER CODE END TIM12_Init 1 */
-  htim12.Instance = TIM12;
-  htim12.Init.Prescaler = 0;
-  htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim12.Init.Period = 65535;
-  htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_PWM_Init(&htim12) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim12, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM12_Init 2 */
-
-  /* USER CODE END TIM12_Init 2 */
-  HAL_TIM_MspPostInit(&htim12);
-
-}
-
-/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -477,7 +443,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, epc901_READ_Pin|epc_901_CLR_PIX_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, epc901_READ_Pin|epc_901_CLR_PIX_Pin|LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(epc901_SHUTTER_GPIO_Port, epc901_SHUTTER_Pin, GPIO_PIN_RESET);
@@ -485,8 +451,8 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, Heated_Roller_Heater_ON_OFF_Pin|Heated_Roller_Motor_ON_OFF_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : epc901_READ_Pin epc_901_CLR_PIX_Pin */
-  GPIO_InitStruct.Pin = epc901_READ_Pin|epc_901_CLR_PIX_Pin;
+  /*Configure GPIO pins : epc901_READ_Pin epc_901_CLR_PIX_Pin LED_Pin */
+  GPIO_InitStruct.Pin = epc901_READ_Pin|epc_901_CLR_PIX_Pin|LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -518,6 +484,14 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : LED_illuminator_PWM_Pin */
+  GPIO_InitStruct.Pin = LED_illuminator_PWM_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF9_TIM12;
+  HAL_GPIO_Init(LED_illuminator_PWM_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pins : BACK_BUTTON_Pin START_BUTTON_Pin SELECT_BUTTON_Pin RIGHT_BUTTON_Pin */
   GPIO_InitStruct.Pin = BACK_BUTTON_Pin|START_BUTTON_Pin|SELECT_BUTTON_Pin|RIGHT_BUTTON_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
@@ -545,45 +519,117 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	if(GPIO_Pin == START_BUTTON_Pin)
 	{
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET);
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+	  rolling = TRUE;
 	} else if(GPIO_Pin == STOP_BUTTON_Pin)
 	{
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_RESET);
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET); // Heated roller heater on/off pin
+	  rolling = FALSE;
 	} else if (GPIO_Pin == SELECT_BUTTON_Pin)
 	{
 		nav_button_pressed = SELECT;
 	}
 }
+
+
+
+
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_startReadADC */
+/* USER CODE BEGIN Header_start_htr_ctrl_loop */
 /**
-  * @brief  Function implementing the readADC thread.
+  * @brief  Function implementing the htr_ctrl_loop thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_startReadADC */
-void startReadADC(void const * argument)
+/* USER CODE END Header_start_htr_ctrl_loop */
+void start_htr_ctrl_loop(void const * argument)
 {
   /* USER CODE BEGIN 5 */
+  char data[4], potData[4];
+  uint8_t len, potLen, potCounts = 0, counts = 0;
+  int16_t avgTemp, potAvg, actTemp, potTemp;
+  uint32_t total, potTotal;
+
+  len = sizeof(avgTempArr)/sizeof(avgTempArr[0]);
+  potLen = sizeof(avgPotArr)/sizeof(avgPotArr[0]);
   /* Infinite loop */
   for(;;)
   {
-	  // Get ADC value
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  raw = HAL_ADC_GetValue(&hadc1);
+	/*
+	 * Heated Roller Temperature Measurement
+	 */
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_SET);
+	sConfig.Channel = ADC_CHANNEL_8;
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
-	  raw_avg = (raw_avg + raw) / 2;
+	/* Start conversion and wait for it to finish */
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
 
-	  sprintf(dat, "%hu", raw_avg);
-	  ssd1306_SetCursor(30, 53);
-	  ssd1306_DrawBox(30, 36, 30, 8, Black);
-	  ssd1306_WriteString((char*)dat, Font_6x8, White);
-	  ssd1306_UpdateScreen(&hi2c1);
+	/* Add new value to array */
+	avgTempArr[counts++] = HAL_ADC_GetValue(&hadc1);
 
-    osDelay(500);
+	/* Restart counter when array is full */
+	if (counts >= len)
+		counts = 0;
+
+	/* Average data points */
+	for (uint8_t i=0; i<=(len - 1); i++)
+		total += avgTempArr[i];
+	avgTemp = (int16_t)(total / len);
+	total = 0;
+
+	/* Convert and send to display */
+	actTemp = convertADCToTemperature(avgTemp, Thermistor, FAHRENHEIT);
+	sprintf(data, "%hu", actTemp);
+	ssd1306_SetCursor(90, 53);
+	ssd1306_DrawBox(90, 53, 30, 8, Black);
+	ssd1306_WriteString((char*)data, Font_6x8, White);
+
+
+	/*
+	 * Heated Roller Control Logic
+	 */
+	/* Select PC5, Slide Pot Pin */
+	sConfig.Channel = ADC_CHANNEL_15;
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	/* Start conversion and wait for it to finish */
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+
+	/* Add new value to array */
+	avgPotArr[potCounts++] = HAL_ADC_GetValue(&hadc1);
+
+	/* Restart counter when array is full */
+	if (potCounts >= potLen)
+		potCounts = 0;
+
+	/* Average data points */
+	for (uint8_t i=0; i<=(potLen - 1); i++)
+		potTotal += avgPotArr[i];
+	potAvg = (int16_t)(potTotal / potLen);
+	potAvg = 4095 - potAvg; // Invert to match pot movement (and wiring)
+	potTotal = 0;
+
+	potTemp = convertADCToTemperature(potAvg, Thermistor, FAHRENHEIT);
+	sprintf(potData, "%hu", potTemp);
+	ssd1306_SetCursor(25, 53);
+	ssd1306_DrawBox(25, 53, 30, 8, Black);
+	ssd1306_WriteString((char*)potData, Font_6x8, White);
+
+	if (rolling == TRUE)
+	{
+		if (actTemp <= potTemp)
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+		else
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+	}
+
+	ssd1306_UpdateScreen(&hi2c1);
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_RESET);
+    osDelay(300);
   }
   /* USER CODE END 5 */
 }

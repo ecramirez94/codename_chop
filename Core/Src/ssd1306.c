@@ -98,7 +98,7 @@ void ssd1306_Fill(SSD1306_COLOR color)
 }
 
 //
-//  Write the screenbuffer with changed to the screen
+//  Write the screen buffer with changes to the screen
 //
 void ssd1306_UpdateScreen(I2C_HandleTypeDef *hi2c)
 {
@@ -271,7 +271,7 @@ char ssd1306_WriteChar(char ch, FontDef Font, SSD1306_COLOR color)
         return 0;
     }
 
-    // Translate font to screenbuffer
+    // Translate font to screen buffer
     for (i = 0; i < Font.FontHeight; i++)
     {
         b = Font.data[(ch - 32) * Font.FontHeight + i];

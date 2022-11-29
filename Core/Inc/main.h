@@ -49,8 +49,6 @@ extern "C" {
 
 /* USER CODE END EM */
 
-void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -67,6 +65,8 @@ void Error_Handler(void);
 #define epc_901_DATA_READY_GPIO_Port GPIOA
 #define epc_901_CLR_PIX_Pin GPIO_PIN_3
 #define epc_901_CLR_PIX_GPIO_Port GPIOA
+#define LED_Pin GPIO_PIN_5
+#define LED_GPIO_Port GPIOA
 #define epc901_SHUTTER_Pin GPIO_PIN_4
 #define epc901_SHUTTER_GPIO_Port GPIOC
 #define Slide_potentiometer_Pin GPIO_PIN_5

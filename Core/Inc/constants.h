@@ -11,6 +11,9 @@
 /* General Use */
 #define FALSE 0
 #define TRUE 1
+#define CELCIUS 0
+#define FAHRENHEIT 1
+
 
 /* Buttons */
 // 0 indicates no button press needs to be handled

@@ -83,8 +83,6 @@ void Error_Handler(void);
 #define DOWN_BUTTON_Pin GPIO_PIN_13
 #define DOWN_BUTTON_GPIO_Port GPIOB
 #define DOWN_BUTTON_EXTI_IRQn EXTI15_10_IRQn
-#define LED_illuminator_PWM_Pin GPIO_PIN_14
-#define LED_illuminator_PWM_GPIO_Port GPIOB
 #define Heated_Roller_Motor_ON_OFF_Pin GPIO_PIN_15
 #define Heated_Roller_Motor_ON_OFF_GPIO_Port GPIOB
 #define BACK_BUTTON_Pin GPIO_PIN_6

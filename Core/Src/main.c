@@ -40,7 +40,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-//ADC_ChannelConfTypeDef sConfig = {0};
+ADC_ChannelConfTypeDef sConfig = {0};
+SemaphoreHandle_t xUpdateStatusSemaphore;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,16 +59,12 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 
 osThreadId htr_ctrl_loopHandle;
-osThreadId updateUI_OLEDHandle;
 /* USER CODE BEGIN PV */
 int avgTempArr[5];
 int avgPotArr[5];
 
-uint8_t rolling = FALSE;
-uint8_t nav_button_pressed = FALSE;
-uint8_t mode_button_pressed = FALSE;
+uint8_t status = STOPPED;
 
-ADC_ChannelConfTypeDef sConfig = {0};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -79,7 +76,6 @@ static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART3_UART_Init(void);
 void start_htr_ctrl_loop(void const * argument);
-void startUI_OLED(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -87,7 +83,7 @@ void startUI_OLED(void const * argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void startUpdateStatus(void * argument);
 /* USER CODE END 0 */
 
 /**
@@ -150,6 +146,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
+  xUpdateStatusSemaphore = xSemaphoreCreateBinary();
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
@@ -165,12 +162,14 @@ int main(void)
   osThreadDef(htr_ctrl_loop, start_htr_ctrl_loop, osPriorityNormal, 0, 128);
   htr_ctrl_loopHandle = osThreadCreate(osThread(htr_ctrl_loop), NULL);
 
-  /* definition and creation of updateUI_OLED */
-  osThreadDef(updateUI_OLED, startUI_OLED, osPriorityNormal, 0, 128);
-  updateUI_OLEDHandle = osThreadCreate(osThread(updateUI_OLED), NULL);
-
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+  xTaskCreate(startUpdateStatus,	// Function name
+			  "UpdateStatus",	// Task name
+			  128,	// Stack Depth
+			  NULL,	// *pvParameters
+			  1,	// Priority
+			  NULL);  // Task Handle
   /* USER CODE END RTOS_THREADS */
 
   /* Start scheduler */
@@ -449,7 +448,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(epc901_SHUTTER_GPIO_Port, epc901_SHUTTER_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, Heated_Roller_Heater_ON_OFF_Pin|Heated_Roller_Motor_ON_OFF_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, Heated_Roller_Heater_ON_OFF_Pin|GPIO_PIN_14|Heated_Roller_Motor_ON_OFF_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : epc901_READ_Pin epc_901_CLR_PIX_Pin LED_Pin */
   GPIO_InitStruct.Pin = epc901_READ_Pin|epc_901_CLR_PIX_Pin|LED_Pin;
@@ -471,8 +470,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(epc901_SHUTTER_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : Heated_Roller_Heater_ON_OFF_Pin Heated_Roller_Motor_ON_OFF_Pin */
-  GPIO_InitStruct.Pin = Heated_Roller_Heater_ON_OFF_Pin|Heated_Roller_Motor_ON_OFF_Pin;
+  /*Configure GPIO pins : Heated_Roller_Heater_ON_OFF_Pin PB14 Heated_Roller_Motor_ON_OFF_Pin */
+  GPIO_InitStruct.Pin = Heated_Roller_Heater_ON_OFF_Pin|GPIO_PIN_14|Heated_Roller_Motor_ON_OFF_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -483,14 +482,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LED_illuminator_PWM_Pin */
-  GPIO_InitStruct.Pin = LED_illuminator_PWM_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF9_TIM12;
-  HAL_GPIO_Init(LED_illuminator_PWM_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : BACK_BUTTON_Pin START_BUTTON_Pin SELECT_BUTTON_Pin RIGHT_BUTTON_Pin */
   GPIO_InitStruct.Pin = BACK_BUTTON_Pin|START_BUTTON_Pin|SELECT_BUTTON_Pin|RIGHT_BUTTON_Pin;
@@ -518,22 +509,55 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 	if(GPIO_Pin == START_BUTTON_Pin)
 	{
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET);
-	  rolling = TRUE;
+		status = RUNNING;
+		xSemaphoreGiveFromISR(xUpdateStatusSemaphore, pdFALSE);
 	} else if(GPIO_Pin == STOP_BUTTON_Pin)
 	{
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_RESET);
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET); // Heated roller heater on/off pin
-	  rolling = FALSE;
+		status = STOPPED;
+		xSemaphoreGiveFromISR(xUpdateStatusSemaphore, pdFALSE);
+		/*
+		 * Heated roller heater on/off pin.
+		 * Turned off here for safety reasons,
+		 * in case task has a fault.
+		 */
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
 	} else if (GPIO_Pin == SELECT_BUTTON_Pin)
 	{
-		nav_button_pressed = SELECT;
+
 	}
 }
 
 
+void startUpdateStatus(void * argument)
+{
+  /* USER CODE BEGIN startUpdateStatus */
+  /* Infinite loop */
+  for(;;)
+  {
+		xSemaphoreTake(xUpdateStatusSemaphore, portMAX_DELAY);
 
+		if (status == RUNNING)
+		{
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET); // Turn on Illumination
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_SET); // Turn on heater roller
 
+			ssd1306_SetCursor(50, 2);
+			ssd1306_DrawBox(50, 2, 30, 9, Black);
+			ssd1306_WriteString("RUNNING", Font_6x8, White);
+			ssd1306_UpdateScreen(&hi2c1);
+		} else if (status == STOPPED)
+		{
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);  // Turn off Heater
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET); // Turn off illumination
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, GPIO_PIN_RESET); // Turn off heater roller
+
+			ssd1306_SetCursor(50, 2);
+			ssd1306_DrawBox(50, 2, 30, 9, Black);
+			ssd1306_WriteString("STOPPED", Font_6x8, White);
+			ssd1306_UpdateScreen(&hi2c1);
+		}
+  }
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_start_htr_ctrl_loop */
@@ -615,11 +639,11 @@ void start_htr_ctrl_loop(void const * argument)
 
 	potTemp = convertADCToTemperature(potAvg, Thermistor, FAHRENHEIT);
 	sprintf(potData, "%hu", potTemp);
-	ssd1306_SetCursor(25, 53);
-	ssd1306_DrawBox(25, 53, 30, 8, Black);
+	ssd1306_SetCursor(26, 53);
+	ssd1306_DrawBox(26, 53, 30, 8, Black);
 	ssd1306_WriteString((char*)potData, Font_6x8, White);
 
-	if (rolling == TRUE)
+	if (status == RUNNING)
 	{
 		if (actTemp <= potTemp)
 			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
@@ -629,55 +653,10 @@ void start_htr_ctrl_loop(void const * argument)
 
 	ssd1306_UpdateScreen(&hi2c1);
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_4, GPIO_PIN_RESET);
-    osDelay(300);
+
+	vTaskDelay(300);
   }
   /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_startUI_OLED */
-/**
-* @brief Function implementing the updateUI_OLED thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_startUI_OLED */
-void startUI_OLED(void const * argument)
-{
-  /* USER CODE BEGIN startUI_OLED */
-  /* Infinite loop */
-  for(;;)
-  {
-	if (nav_button_pressed != FALSE)
-	{
-		switch (nav_button_pressed)
-		{
-			case UP:
-
-			break;
-			case DOWN:
-
-			break;
-			case LEFT:
-
-			break;
-			case RIGHT:
-
-			break;
-			case SELECT:
-//			  ssd1306_SetCursor(0, 5);
-//			  ssd1306_WriteString("SELECT", Font_6x8, White);
-//			  ssd1306_UpdateScreen(&hi2c1);
-			break;
-			case BACK:
-
-			break;
-		}
-		nav_button_pressed = FALSE;
-	}
-
-    osDelay(100);
-  }
-  /* USER CODE END startUI_OLED */
 }
 
 /**

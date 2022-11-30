@@ -14,6 +14,10 @@
 #define CELCIUS 0
 #define FAHRENHEIT 1
 
+/* Machine Status */
+#define STOPPED 0
+#define RUNNING 1
+#define REVERSING 2
 
 /* Buttons */
 // 0 indicates no button press needs to be handled

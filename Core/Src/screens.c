@@ -28,8 +28,15 @@ void Draw_Home_Screen(void)
 	/*
 	 * Fill in Text
 	 */
+	ssd1306_SetCursor(2, 2);
+	ssd1306_WriteString("STATUS: ", Font_6x8, White);
+
+	ssd1306_SetCursor(50, 2);
+	ssd1306_WriteString("Stopped", Font_6x8, White);
+
 	ssd1306_SetCursor(2, 53);
 	ssd1306_WriteString("Set: ", Font_6x8, White);
+
 	ssd1306_SetCursor(66, 53);
 	ssd1306_WriteString("Act: ", Font_6x8, White);
 }
